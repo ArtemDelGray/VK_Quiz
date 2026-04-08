@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Создание квиза - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .editor-container { max-width: 950px; margin: 20px auto; padding: 20px; }
+        .editor-section { 
+            background: white; padding: 25px; border-radius: 12px; 
+            margin-bottom: 20px; border: 1px solid #e5e7eb; 
+            position: relative; box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .question-item { display: flex; gap: 25px; border-left: 5px solid var(--primary-blue); }
+        .q-editor-left { flex: 0 0 220px; text-align: center; }
+        .q-editor-right { flex: 1; padding-right: 40px; }
+
+        .q-img-preview { 
+            width: 100%; max-height: 180px; display: none; 
+            margin-top: 15px; border-radius: 8px; border: 1px solid #d1d5db; object-fit: cover;
+        }
+
+        .file-label { 
+            display: block; padding: 10px; background: #f3f4f6; 
+            border: 1px dashed #9ca3af; border-radius: 8px; 
+            cursor: pointer; font-size: 0.9rem; text-align: center;
+        }
+
+        .ans-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .ans-row input[type="text"] { margin: 0; flex: 1; }
+        
+        .remove-opt-btn {
+            background: none; border: none; color: #9ca3af;
+            font-size: 1.2rem; cursor: pointer; width: 30px; margin: 0; padding: 0;
+        }
+        .remove-opt-btn:hover { color: var(--error-red); }
+
+        .q-delete-trigger {
+            position: absolute; top: 15px; right: 15px;
+            background: #f3f4f6; color: #6b7280; border: none;
+            width: 30px; height: 30px; border-radius: 6px;
+            cursor: pointer; font-size: 1.1rem;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .q-delete-trigger:hover { background: #fee2e2; color: var(--error-red); }
+
+        .delete-confirm-overlay {
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.95); border-radius: 12px;
+            z-index: 20; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .delete-confirm-overlay.active { display: flex; }
+
+        .header-nav-back {
+            margin-bottom: 20px; display: inline-block;
+            text-decoration: none; color: var(--primary-blue); font-weight: bold;
+        }
+
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-weight: bold; margin-bottom: 5px; color: var(--text-main); }
+        .input-group input { margin-top: 0; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+</header>
+
+<div class="editor-container">
+    <a href="/quizzes.html" class="header-nav-back">← Назад к моим квизам</a>
+    
+    <div class="editor-section">
+        <h2 id="editorTitle" style="margin-top:0; margin-bottom: 20px;">Настройки квиза</h2>
+        
+        <div class="input-group">
+            <label for="quizTitle">Название квиза</label>
+            <input type="text" id="quizTitle" placeholder="Например: История Древнего Рима">
+        </div>
+        
+        <div class="input-group">
+            <label for="quizCat">Категория</label>
+            <input type="text" id="quizCat" placeholder="Например: История">
+        </div>
+    </div>
+
+    <div id="questionsContainer"></div>
+
+    <div style="display: flex; gap: 15px; margin-bottom: 50px;">
+        <button onclick="addQuestion()" class="secondary-btn" style="flex: 1">+ Добавить вопрос</button>
+        <button onclick="saveQuiz()" style="flex: 1">Сохранить весь квиз</button>
+    </div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const editQuizId = urlParams.get('edit');
+
+    function showToast(message, type = 'error') {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container';
+            document.body.appendChild(container);
+        }
+        const toast = document.createElement('div');
+        toast.className = `custom-toast ${type}`;
+        toast.innerText = message;
+        container.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    async function initEditor() {
+        if (editQuizId) {
+            document.getElementById('editorTitle').innerText = 'Редактирование квиза';
+            try {
+                const res = await fetch(`/quiz/${editQuizId}`);
+                if (res.ok) {
+                    const quiz = await res.json();
+                    document.getElementById('quizTitle').value = quiz.title;
+                    document.getElementById('quizCat').value = quiz.category;
+                    
+                    if (quiz.questions && quiz.questions.length > 0) {
+                        quiz.questions.forEach(q => addQuestion(q));
+                    } else {
+                        addQuestion();
+                    }
+                } else {
+                    showToast('Ошибка загрузки квиза', 'error');
+                    addQuestion();
+                }
+            } catch (e) {
+                console.error(e);
+                addQuestion();
+            }
+        } else {
+            addQuestion();
+        }
+    }
+
+    function addQuestion(qData = null) {
+        const qId = Date.now() + Math.floor(Math.random() * 10000);
+        
+        const text = qData ? qData.text : '';
+        const image = qData ? qData.image : '';
+        const type = qData ? qData.type : 'single';
+        const options = qData && qData.options && qData.options.length > 0 ? qData.options : [
+            { text: '', isCorrect: true },
+            { text: '', isCorrect: false }
+        ];
+
+        let optionsHtml = '';
+        const inputType = type === 'single' ? 'radio' : 'checkbox';
+        options.forEach(opt => {
+            optionsHtml += createOptionHtml(qId, inputType, opt.isCorrect, opt.text);
+        });
+
+        const html = `
+            <div class="editor-section question-item" id="q_${qId}">
+                <button class="q-delete-trigger" onclick="showDeleteConfirm(${qId})">×</button>
+
+                <div class="delete-confirm-overlay" id="confirm_${qId}">
+                    <p style="font-weight:bold; color:var(--text-main); margin-bottom:15px;">Удалить этот вопрос?</p>
+                    <div style="display:flex; gap:10px; width:250px;">
+                        <button onclick="removeQuestion(${qId})" style="margin:0; background:var(--error-red);">Да, удалить</button>
+                        <button onclick="hideDeleteConfirm(${qId})" class="secondary-btn" style="margin:0;">Отмена</button>
+                    </div>
+                </div>
+
+                <div class="q-editor-left">
+                    <label class="file-label">📸 Фото<input type="file" accept="image/*" style="display:none" onchange="handleImgUpload(this, ${qId})"></label>
+                    <img id="prev_${qId}" class="q-img-preview" ${image ? `src="${image}" style="display:block;"` : ''}>
+                    <input type="hidden" id="path_${qId}" class="q-img-path" value="${image || ''}">
+                </div>
+
+                <div class="q-editor-right">
+                    <select class="type-select" style="margin-top: 0; margin-bottom: 15px;" onchange="updateAnsInputType(${qId}, this.value)">
+                        <option value="single" ${type === 'single' ? 'selected' : ''}>Один ответ</option>
+                        <option value="multiple" ${type === 'multiple' ? 'selected' : ''}>Несколько ответов</option>
+                    </select>
+                    <input type="text" placeholder="Текст вопроса" class="q-text" style="margin-top: 0; margin-bottom: 15px;" value="${text.replace(/"/g, '&quot;')}">
+                    <div id="ans_container_${qId}" class="ans-container">
+                        ${optionsHtml}
+                    </div>
+                    <button onclick="addOption(${qId})" class="secondary-btn" style="width: auto; padding: 6px 15px; font-size: 0.85rem; margin-top: 10px;">+ Вариант</button>
+                </div>
+            </div>
+        `;
+        document.getElementById('questionsContainer').insertAdjacentHTML('beforeend', html);
+    }
+
+    function createOptionHtml(qId, type, checked = false, text = '') {
+        const nameAttr = type === 'radio' ? `name="correct_${qId}"` : '';
+        return `
+            <div class="ans-row">
+                <input type="${type}" ${nameAttr} title="Верный ответ" ${checked ? 'checked' : ''}>
+                <input type="text" placeholder="Вариант ответа" value="${text.replace(/"/g, '&quot;')}">
+                <button class="remove-opt-btn" onclick="this.parentElement.remove()" title="Удалить вариант">×</button>
+            </div>
+        `;
+    }
+
+    function showDeleteConfirm(qId) { document.getElementById(`confirm_${qId}`).classList.add('active'); }
+    function hideDeleteConfirm(qId) { document.getElementById(`confirm_${qId}`).classList.remove('active'); }
+    function removeQuestion(qId) { document.getElementById(`q_${qId}`).remove(); }
+
+    function addOption(qId) {
+        const container = document.getElementById(`ans_container_${qId}`);
+        const type = document.getElementById(`q_${qId}`).querySelector('.type-select').value === 'single' ? 'radio' : 'checkbox';
+        container.insertAdjacentHTML('beforeend', createOptionHtml(qId, type));
+    }
+
+    function updateAnsInputType(qId, quizType) {
+        const container = document.getElementById(`ans_container_${qId}`);
+        const inputs = container.querySelectorAll('input[title="Верный ответ"]');
+        inputs.forEach((input, index) => {
+            if (quizType === 'single') {
+                input.type = 'radio';
+                input.name = `correct_${qId}`;
+                if (index === 0) input.checked = true;
+            } else {
+                input.type = 'checkbox';
+                input.removeAttribute('name');
+            }
+        });
+    }
+
+    async function handleImgUpload(input, qId) {
+        if (!input.files[0]) return;
+        const formData = new FormData();
+        formData.append('questionImage', input.files[0]);
+        const res = await fetch('/upload-question-img', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.imageUrl) {
+            const img = document.getElementById(`prev_${qId}`);
+            img.src = data.imageUrl; img.style.display = 'block';
+            document.getElementById(`path_${qId}`).value = data.imageUrl;
+        }
+    }
+
+    async function saveQuiz() {
+        const title = document.getElementById('quizTitle').value.trim();
+        if (!title) {
+            showToast("Введите название квиза", "error");
+            return;
+        }
+        
+        const qNodes = document.querySelectorAll('.question-item');
+        const questions = Array.from(qNodes).map(node => {
+            const id = node.id.split('_')[1];
+            const options = Array.from(node.querySelectorAll('.ans-row')).map(row => ({
+                text: row.querySelector('input[type="text"]').value.trim(),
+                isCorrect: row.querySelector('input[title="Верный ответ"]').checked
+            }));
+            return {
+                text: node.querySelector('.q-text').value.trim(),
+                image: node.querySelector('.q-img-path').value,
+                type: node.querySelector('.type-select').value,
+                options
+            };
+        });
+
+        const method = editQuizId ? 'PUT' : 'POST';
+        const url = editQuizId ? `/edit-quiz/${editQuizId}` : '/create-quiz';
+
+        const res = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, category: document.getElementById('quizCat').value, questions })
+        });
+        
+        if (res.ok) {
+            location.href = '/quizzes.html';
+        } else {
+            showToast('Ошибка при сохранении квиза', 'error');
+        }
+    }
+
+    initEditor();
+</script>
+</body>
+</html>

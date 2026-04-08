@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Авторизация - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+</header>
+
+<div class="container">
+    <div id="loginForm">
+        <h2>Вход</h2>
+        
+        <input type="text" id="loginUser" placeholder="Логин">
+        <input type="password" id="loginPass" placeholder="Пароль">
+        <div id="loginError" class="error-hint">Неверный логин или пароль</div>
+
+        <button id="loginBtn" onclick="handleAuth('login')" disabled>Войти</button>
+        <p class="toggle-form">Нет аккаунта? <span onclick="toggleAuth()">Зарегистрироваться</span></p>
+    </div>
+
+    <div id="registerForm" style="display: none;">
+        <h2>Регистрация</h2>
+        
+        <input type="text" id="regUser" placeholder="Логин">
+        <div id="userError" class="error-hint">Этот логин уже занят</div>
+
+        <input type="password" id="regPass" placeholder="Пароль (минимум 8 символов)">
+        <div id="passError" class="error-hint">Пароль слишком короткий</div>
+
+        <input type="password" id="regPassConfirm" placeholder="Повторите пароль">
+        <div id="confirmError" class="error-hint">Пароли не совпадают</div>
+
+        <button id="regBtn" onclick="handleAuth('register')" disabled>Создать аккаунт</button>
+        <p class="toggle-form">Уже есть аккаунт? <span onclick="toggleAuth()">Войти</span></p>
+    </div>
+</div>
+
+<script>
+    const loginBtn = document.getElementById('loginBtn');
+    const regBtn = document.getElementById('regBtn');
+
+    function toggleAuth() {
+        const isLoginVisible = document.getElementById('loginForm').style.display !== 'none';
+        document.getElementById('loginForm').style.display = isLoginVisible ? 'none' : 'block';
+        document.getElementById('registerForm').style.display = isLoginVisible ? 'block' : 'none';
+        resetErrors();
+    }
+
+    function resetErrors() {
+        document.querySelectorAll('input').forEach(i => i.classList.remove('invalid'));
+        document.querySelectorAll('.error-hint').forEach(e => e.style.display = 'none');
+    }
+
+    function validateLogin() {
+        const user = document.getElementById('loginUser').value;
+        const pass = document.getElementById('loginPass').value;
+        
+        document.getElementById('loginUser').classList.remove('invalid');
+        document.getElementById('loginPass').classList.remove('invalid');
+        document.getElementById('loginError').style.display = 'none';
+        
+        loginBtn.disabled = !(user.length > 0 && pass.length > 0);
+    }
+
+    function validateReg() {
+        const user = document.getElementById('regUser').value;
+        const pass = document.getElementById('regPass').value;
+        const confirm = document.getElementById('regPassConfirm').value;
+
+        let isValid = true;
+
+        if (user.length < 1) isValid = false;
+
+        if (pass.length > 0 && pass.length < 8) {
+            document.getElementById('regPass').classList.add('invalid');
+            document.getElementById('passError').style.display = 'block';
+            isValid = false;
+        } else {
+            document.getElementById('regPass').classList.remove('invalid');
+            document.getElementById('passError').style.display = 'none';
+        }
+
+        if (confirm.length > 0 && pass !== confirm) {
+            document.getElementById('regPassConfirm').classList.add('invalid');
+            document.getElementById('confirmError').style.display = 'block';
+            isValid = false;
+        } else {
+            document.getElementById('regPassConfirm').classList.remove('invalid');
+            document.getElementById('confirmError').style.display = 'none';
+        }
+
+        if (pass.length === 0 || confirm.length === 0) isValid = false;
+        regBtn.disabled = !isValid;
+    }
+
+    document.getElementById('loginUser').addEventListener('input', validateLogin);
+    document.getElementById('loginPass').addEventListener('input', validateLogin);
+    
+    document.getElementById('regUser').addEventListener('input', validateReg);
+    document.getElementById('regPass').addEventListener('input', validateReg);
+    document.getElementById('regPassConfirm').addEventListener('input', validateReg);
+
+    async function handleAuth(type) {
+        const isReg = type === 'register';
+        const username = document.getElementById(isReg ? 'regUser' : 'loginUser').value;
+        const password = document.getElementById(isReg ? 'regPass' : 'loginPass').value;
+
+        try {
+            const response = await fetch('/' + type, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                window.location.href = '/profile.html';
+            } else {
+                if (type === 'login') {
+                    document.getElementById('loginUser').classList.add('invalid');
+                    document.getElementById('loginPass').classList.add('invalid');
+                    document.getElementById('loginError').style.display = 'block';
+                } else if (isReg && result.error.includes('занят')) {
+                    document.getElementById('regUser').classList.add('invalid');
+                    document.getElementById('userError').style.display = 'block';
+                }
+            }
+        } catch (err) {
+            console.error('Ошибка сервера');
+        }
+    }
+</script>
+
+</body>
+</html>

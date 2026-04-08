@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Выбор квиза - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+    <div class="header-right">
+        <a href="/quizzes.html" class="nav-link">Мои квизы</a>
+        <div class="user-dropdown">
+            <img id="headerAvatar" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="header-avatar" onclick="toggleDropdown()">
+            <div id="myDropdown" class="dropdown-content">
+                <a href="/profile.html">Профиль</a>
+                <a href="/logout" style="color: var(--error-red);">Выход</a>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="container" style="max-width: 800px;">
+    <a href="/profile.html" style="display:inline-block; margin-bottom: 20px; color: var(--primary-blue); font-weight: bold; text-decoration: none;">← Назад в профиль</a>
+    <h2>Выберите квиз для игры</h2>
+    <p style="color: #6b7280; margin-bottom: 30px;">Нажмите на квиз, чтобы создать комнату</p>
+    
+    <div id="quizList" class="quiz-grid">
+        <p>Загрузка квизов...</p>
+    </div>
+</div>
+
+<script>
+    function toggleDropdown() { document.getElementById("myDropdown").classList.toggle("show"); }
+
+    fetch('/profile-data').then(r => r.json()).then(d => {
+        if(d.avatar) document.getElementById('headerAvatar').src = d.avatar;
+    });
+
+    async function loadQuizzes() {
+        const res = await fetch('/my-quizzes-data');
+        const data = await res.json();
+        const list = document.getElementById('quizList');
+        list.innerHTML = '';
+
+        if (data.length === 0) {
+            list.innerHTML = `
+                <div style="grid-column: 1/-1; text-align: center; padding: 40px;">
+                    <p>У вас пока нет квизов.</p>
+                    <button onclick="location.href='/editor.html'" style="width: auto; padding: 10px 20px;">Создать первый квиз</button>
+                </div>`;
+            return;
+        }
+
+        data.forEach(q => {
+            list.innerHTML += `
+                <div class="quiz-card" onclick="location.href='/game.html?mode=host&quizId=${q.id}'">
+                    <h3>${q.title}</h3>
+                    <div class="meta">Категория: ${q.category || 'Общее'}</div>
+                    <div class="meta">Вопросов: ${q.questions.length}</div>
+                    <div style="margin-top: 15px; color: var(--primary-blue); font-weight: bold;">Выбрать и создать ➔</div>
+                </div>
+            `;
+        });
+    }
+
+    loadQuizzes();
+</script>
+</body>
+</html>

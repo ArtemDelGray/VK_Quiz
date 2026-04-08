@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Присоединиться - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+</header>
+
+<div class="container">
+    <h2 style="text-align: center;">Вход в комнату</h2>
+    <p style="color: #6b7280; text-align: center;">Введите 5-значный код комнаты</p>
+    
+    <input type="text" id="roomCode" placeholder="КОД" maxlength="5" style="text-align: center; font-size: 1.8rem; letter-spacing: 5px; text-transform: uppercase;">
+    
+    <div id="joinError" class="ui-error"></div>
+
+    <button onclick="join()">Войти в игру</button>
+    <button class="back-btn" onclick="location.href='/profile.html'">Назад</button>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get('error');
+    if (error) {
+        const errorDiv = document.getElementById('joinError');
+        errorDiv.innerText = decodeURIComponent(error);
+        errorDiv.style.display = 'block';
+    }
+
+    function join() {
+        const code = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!code) {
+            const errorDiv = document.getElementById('joinError');
+            errorDiv.innerText = "Введите код комнаты";
+            errorDiv.style.display = "block";
+            return;
+        }
+        window.location.href = `/game.html?mode=join&code=${code}`;
+    }
+</script>
+</body>
+</html>

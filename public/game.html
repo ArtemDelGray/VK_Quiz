@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Игра - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+    <div id="roomInfo" style="font-weight: bold; color: var(--text-main);"></div>
+</header>
+
+<div class="container" id="mainContainer" style="max-width: 800px;">
+    
+    <div id="leaveModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3>Выход из игры</h3>
+            <p>Вы уверены, что хотите выйти? Ваши результаты не будут сохранены в итоговой таблице.</p>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="back-btn" onclick="closeLeaveModal()" style="margin: 0;">Отмена</button>
+                <button onclick="confirmLeave()" style="margin: 0; background-color: var(--error-red);">Выйти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- СЕКЦИЯ ЛОББИ -->
+    <div id="lobbySection">
+        <h2 id="lobbyTitle">Ожидание игроков...</h2>
+        <div id="hostCodeArea" style="display: none;">
+            <p style="color: #6b7280; margin-bottom: 0;">Код для подключения:</p>
+            <div class="room-code-display" id="displayCode">------</div>
+        </div>
+        
+        <button id="startBtn" style="display: none; margin-top: 30px;" onclick="startGame()" disabled>Начать квиз</button>
+        <button class="back-btn" onclick="leaveGame()">Выйти</button>
+    </div>
+
+    <!-- СЕКЦИЯ ИГРЫ -->
+    <div id="gameSection" style="display: none;">
+        <div class="preview-header">
+            <div>
+                <h2 id="qTitle" style="margin-bottom: 5px;">Вопрос</h2>
+                <div class="q-progress" id="qProgress"></div>
+            </div>
+            <button class="back-btn" onclick="leaveGame()" style="width: auto; padding: 8px 15px; margin: 0; font-size: 0.9rem;">Выйти</button>
+        </div>
+        
+        <div class="timer-display" id="timerDisplay">Осталось: <span id="timerValue">5</span> сек</div>
+        
+        <div id="questionArea"></div>
+        <div id="optionsArea"></div>
+        
+        <!-- Кнопки управления для ХОСТА -->
+        <div id="hostControls" style="display: none; margin-top: 30px;">
+            <button id="checkBtn" onclick="triggerCheck()">Проверить ответы (5 сек)</button>
+            <button id="nextBtn" onclick="nextQuestion()" style="display: none;">Следующий вопрос</button>
+        </div>
+    </div>
+
+    <!-- СЕКЦИЯ РЕЗУЛЬТАТОВ -->
+    <div id="resultsSection" style="display: none;">
+        <h2 style="font-size: 2rem; color: var(--primary-blue);">Игра завершена!</h2>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Место</th>
+                    <th>Игрок</th>
+                    <th>Баллы</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboardBody"></tbody>
+        </table>
+        <button onclick="location.href='/profile.html'" style="margin-top: 30px;">Вернуться в профиль</button>
+    </div>
+
+    <!-- СПИСОК ИГРОКОВ (Виден всегда) -->
+    <div class="players-footer" id="playersFooter">
+        <h3 style="margin-top: 0; font-size: 1.1rem;">Игроки:</h3>
+        <div class="lobby-grid" id="playersList"></div>
+    </div>
+
+</div>
+
+<script>
+    const socket = io();
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const roomCode = urlParams.get('code');
+    const quizId = urlParams.get('quizId');
+    
+    let currentUser = null;
+    let isHost = mode === 'host';
+    let currentRoomCode = '';
+    
+    let currentQuestionData = null;
+    let selectedOptions = [];
+    let isInputLocked = false;
+    let countdownInterval = null;
+    
+    let currentQuestionIndex = 0;
+    let totalQuestionsCount = 0;
+    
+    let hostDisconnectToast = null;
+
+    function showToast(message, type = 'error', duration = 3000) {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container';
+            document.body.appendChild(container);
+        }
+        const toast = document.createElement('div');
+        toast.className = `custom-toast ${type}`;
+        
+        const textSpan = document.createElement('span');
+        textSpan.innerText = message;
+        textSpan.style.flex = '1';
+        toast.appendChild(textSpan);
+
+        if (duration === 0) {
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.marginLeft = '15px';
+            closeBtn.style.fontSize = '1.5rem';
+            closeBtn.style.lineHeight = '1';
+            closeBtn.style.opacity = '0.7';
+            closeBtn.onmouseover = () => closeBtn.style.opacity = '1';
+            closeBtn.onmouseout = () => closeBtn.style.opacity = '0.7';
+            closeBtn.onclick = () => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 300);
+                if (toast === hostDisconnectToast) hostDisconnectToast = null;
+            };
+            toast.appendChild(closeBtn);
+        }
+        
+        container.appendChild(toast);
+        
+        if (duration > 0) {
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, duration);
+        }
+        
+        return toast;
+    }
+
+    async function init() {
+        const res = await fetch('/profile-data');
+        if (!res.ok) return window.location.href = '/';
+        currentUser = await res.json();
+
+        if (isHost && quizId) {
+            socket.emit('create_room', { userData: currentUser, quizId: quizId });
+            document.getElementById('hostCodeArea').style.display = 'block';
+            document.getElementById('startBtn').style.display = 'block';
+        } else if (mode === 'join' && roomCode) {
+            socket.emit('join_room', { roomCode: roomCode, userData: currentUser });
+        } else {
+            window.location.href = '/profile.html';
+        }
+    }
+
+    socket.on('room_created', (data) => {
+        currentRoomCode = data.code;
+        document.getElementById('displayCode').innerText = data.code;
+        document.getElementById('roomInfo').innerText = `Квиз: ${data.quizTitle}`;
+    });
+
+    socket.on('join_success', (data) => {
+        currentRoomCode = data.code;
+        if (data.isHost) {
+            isHost = true;
+            document.getElementById('hostControls').style.display = 'block';
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('hostCodeArea').style.display = 'block';
+            document.getElementById('displayCode').innerText = data.code;
+        } else {
+            if (data.hostConnected === false && !hostDisconnectToast) {
+                hostDisconnectToast = showToast('Организатор покинул игру. Ожидаем возвращения...', 'warning', 0);
+            }
+        }
+        document.getElementById('roomInfo').innerText = `Квиз: ${data.quizTitle}`;
+        document.getElementById('lobbyTitle').innerText = 'Ожидаем запуска игры хостом...';
+    });
+
+    socket.on('update_players', (players) => {
+        renderPlayers(players);
+        if (isHost) {
+            document.getElementById('startBtn').disabled = players.length === 0;
+        }
+    });
+
+    socket.on('error_msg', (msg) => {
+        window.location.href = '/profile.html?error=' + encodeURIComponent(msg);
+    });
+
+    socket.on('host_disconnected', () => {
+        if (!isHost && !hostDisconnectToast) {
+            hostDisconnectToast = showToast('Организатор покинул игру. Ожидаем возвращения...', 'warning', 0);
+        }
+    });
+
+    socket.on('host_reconnected', () => {
+        if (!isHost) {
+            if (hostDisconnectToast) {
+                hostDisconnectToast.classList.add('fade-out');
+                setTimeout(() => {
+                    if (hostDisconnectToast) hostDisconnectToast.remove();
+                    hostDisconnectToast = null;
+                }, 300);
+            }
+            showToast('Организатор вернулся! Игра продолжается.', 'success', 3000);
+        }
+    });
+
+    socket.on('game_started', (data) => {
+        document.getElementById('lobbySection').style.display = 'none';
+        document.getElementById('gameSection').style.display = 'block';
+        if (isHost) document.getElementById('hostControls').style.display = 'block';
+        
+        setupQuestion(data.question, data.questionIndex, data.totalQuestions);
+        
+        if (data.myAnswers && data.myAnswers.length > 0) {
+            selectedOptions = data.myAnswers;
+            renderOptions();
+        }
+
+        renderPlayers(data.players);
+
+        if (data.status === 'checking' || data.status === 'locked') {
+            isInputLocked = true;
+            if (isHost) {
+                document.getElementById('checkBtn').style.display = 'none';
+                const nextBtn = document.getElementById('nextBtn');
+                nextBtn.style.display = 'block';
+                if (data.questionIndex >= data.totalQuestions - 1) {
+                    nextBtn.innerText = 'Закончить квиз';
+                } else {
+                    nextBtn.innerText = 'Следующий вопрос';
+                }
+            }
+        }
+    });
+
+    socket.on('new_question', (data) => {
+        setupQuestion(data.question, data.questionIndex, null); 
+        renderPlayers(data.players);
+    });
+
+    socket.on('start_timer', (seconds) => {
+        if (isHost) document.getElementById('checkBtn').style.display = 'none';
+        
+        const timerDisplay = document.getElementById('timerDisplay');
+        const timerValue = document.getElementById('timerValue');
+        timerDisplay.style.display = 'block';
+        
+        let timeLeft = seconds;
+        timerValue.innerText = timeLeft;
+        
+        countdownInterval = setInterval(() => {
+            timeLeft--;
+            timerValue.innerText = timeLeft;
+            if (timeLeft <= 0) {
+                clearInterval(countdownInterval);
+                timerDisplay.style.display = 'none';
+            }
+        }, 1000);
+    });
+
+    socket.on('answers_locked', (data) => {
+        isInputLocked = true; 
+        
+        const optsHtml = document.getElementById('optionsArea');
+        const rows = optsHtml.querySelectorAll('.option-row');
+        
+        data.correctOptions.forEach((isCorrect, idx) => {
+            const row = rows[idx];
+            const isSelected = selectedOptions.includes(idx);
+            const iconSpan = row.querySelector('.check-icon');
+            
+            row.classList.add('disabled');
+
+            if (isCorrect && isSelected) {
+                row.classList.add('correct'); iconSpan.innerText = '✓'; iconSpan.style.display = 'block';
+            } else if (isCorrect && !isSelected) {
+                row.classList.add('missed-correct'); iconSpan.innerText = '✓'; iconSpan.style.display = 'block';
+            } else if (!isCorrect && isSelected) {
+                row.classList.add('incorrect'); iconSpan.innerText = '✖'; iconSpan.style.display = 'block';
+            }
+        });
+
+        renderPlayers(data.players);
+
+        if (isHost) {
+            const nextBtn = document.getElementById('nextBtn');
+            nextBtn.style.display = 'block';
+            if (currentQuestionIndex >= totalQuestionsCount - 1) {
+                nextBtn.innerText = 'Закончить квиз';
+            } else {
+                nextBtn.innerText = 'Следующий вопрос';
+            }
+        }
+    });
+
+    socket.on('game_over', (players) => {
+        document.getElementById('gameSection').style.display = 'none';
+        document.getElementById('playersFooter').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'block';
+        
+        const tbody = document.getElementById('leaderboardBody');
+        tbody.innerHTML = '';
+        
+        let currentRank = 1;
+        let previousScore = null;
+
+        players.forEach((p, index) => {
+            const score = Math.round(p.score * 100) / 100;
+            
+            if (previousScore !== null && score < previousScore) {
+                currentRank = index + 1;
+            }
+            previousScore = score;
+
+            let rowClass = '';
+            if (currentRank === 1 && score > 0) rowClass = 'rank-1';
+            else if (currentRank === 2) rowClass = 'rank-2';
+            else if (currentRank === 3) rowClass = 'rank-3';
+
+            tbody.innerHTML += `
+                <tr class="${rowClass}">
+                    <td>#${currentRank}</td>
+                    <td>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <img src="${p.avatar}" style="width:30px; height:30px; border-radius:50%; object-fit:cover;">
+                            ${p.username}
+                        </div>
+                    </td>
+                    <td>${score}</td>
+                </tr>
+            `;
+        });
+    });
+
+    function startGame() {
+        if (isHost) socket.emit('start_game', currentRoomCode);
+    }
+
+    function setupQuestion(qData, index, total) {
+        currentQuestionData = qData;
+        currentQuestionIndex = index;
+        selectedOptions = [];
+        isInputLocked = false;
+        
+        if (total !== null && total !== undefined) {
+            totalQuestionsCount = total;
+            document.getElementById('qProgress').innerText = `Вопрос ${index + 1} из ${total}`;
+        } else {
+            document.getElementById('qProgress').innerText = `Вопрос ${index + 1} из ${totalQuestionsCount}`;
+        }
+
+        let html = '';
+        if (qData.image) html += `<img src="${qData.image}" class="preview-img">`;
+        html += `<div class="preview-question-text">${qData.text}</div>`;
+        html += `<div style="margin-bottom: 15px; color: #6b7280; font-size: 0.95rem; text-align: left;">
+                    ${qData.type === 'single' ? 'Выберите один вариант ответа' : 'Выберите один или несколько вариантов ответа'}
+                 </div>`;
+        
+        document.getElementById('questionArea').innerHTML = html;
+        
+        if (isHost) {
+            document.getElementById('checkBtn').style.display = 'block';
+            document.getElementById('nextBtn').style.display = 'none';
+        }
+
+        renderOptions();
+    }
+
+    function renderOptions() {
+        let html = '';
+        currentQuestionData.options.forEach((opt, idx) => {
+            const isSelected = selectedOptions.includes(idx);
+            let classes = 'option-row';
+            
+            if (isSelected) classes += ' selected';
+            if (isInputLocked || isHost) classes += ' disabled'; 
+            
+            html += `
+                <div class="${classes}" onclick="toggleOption(${idx})">
+                    <span>${opt.text}</span>
+                    <span class="check-icon">✓</span>
+                </div>
+            `;
+        });
+        document.getElementById('optionsArea').innerHTML = html;
+    }
+
+    function toggleOption(idx) {
+        if (isInputLocked || isHost) return;
+        
+        if (currentQuestionData.type === 'single') {
+            selectedOptions = [idx];
+        } else {
+            const pos = selectedOptions.indexOf(idx);
+            if (pos === -1) selectedOptions.push(idx);
+            else selectedOptions.splice(pos, 1);
+        }
+        
+        renderOptions();
+        socket.emit('submit_answer', { roomCode: currentRoomCode, selectedOptions });
+    }
+
+    function triggerCheck() {
+        if (isHost) socket.emit('trigger_check', currentRoomCode);
+    }
+
+    function nextQuestion() {
+        if (isHost) socket.emit('next_question', currentRoomCode);
+    }
+
+    function leaveGame() {
+        document.getElementById('leaveModal').style.display = 'flex';
+    }
+
+    function closeLeaveModal() {
+        document.getElementById('leaveModal').style.display = 'none';
+    }
+
+    function confirmLeave() {
+        socket.emit('leave_room', currentRoomCode);
+        window.location.href = '/profile.html';
+    }
+
+    function renderPlayers(players) {
+        const list = document.getElementById('playersList');
+        list.innerHTML = '';
+        players.forEach(p => {
+            let borderClass = '';
+            if (p.lastColor === 'green') borderClass = 'border-green';
+            else if (p.lastColor === 'yellow') borderClass = 'border-yellow';
+            else if (p.lastColor === 'red') borderClass = 'border-red';
+
+            let dotClass = 'status-dot';
+            if (p.hasAnswered) dotClass += ' answered';
+
+            const score = Math.round(p.score * 100) / 100;
+
+            list.innerHTML += `
+                <div class="player-card">
+                    <div class="player-avatar-wrapper">
+                        <img src="${p.avatar}" class="player-avatar ${borderClass}">
+                        <div class="${dotClass}"></div>
+                    </div>
+                    <div class="player-name">${p.username}</div>
+                    <div class="player-score">${score} баллов</div>
+                </div>
+            `;
+        });
+    }
+
+    init();
+</script>
+</body>
+</html>

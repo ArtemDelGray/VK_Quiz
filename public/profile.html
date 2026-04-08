@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Личный кабинет - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .profile-header { display: flex; align-items: center; gap: 25px; margin-bottom: 30px; }
+        .avatar-wrapper { position: relative; width: 110px; height: 110px; cursor: pointer; }
+        .avatar-img { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 4px solid var(--primary-blue); transition: all 0.3s ease; }
+        .avatar-wrapper:hover .avatar-img { opacity: 0.6; filter: brightness(0.7); }
+        .avatar-wrapper::after { content: "Сменить"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-weight: bold; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .avatar-wrapper:hover::after { opacity: 1; }
+        #fileInput { display: none; }
+        .user-info-text { text-align: left; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-top: 25px; }
+        .stat-card { background: #f9fafb; padding: 20px; border-radius: 10px; border: 1px solid #e5e7eb; text-align: center; }
+        .stat-card h3 { color: var(--primary-blue); margin: 0; font-size: 0.9rem; }
+        .count { font-size: 2rem; font-weight: 800; color: var(--text-main); margin: 10px 0 0 0; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+    <div class="header-right">
+        <a href="/quizzes.html" class="nav-link">Мои квизы</a>
+        <div class="user-dropdown">
+            <img src="https://cdn-icons-png.flaticon.com/512/149/149071.png" alt="Avatar" class="header-avatar" id="headerAvatar" onclick="toggleDropdown()">
+            <div id="myDropdown" class="dropdown-content">
+                <a href="/profile.html">Профиль</a>
+                <a href="/logout" style="color: var(--error-red);">Выход</a>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="container" style="max-width: 800px;">
+    <div class="profile-header">
+        <div class="avatar-wrapper" onclick="document.getElementById('fileInput').click()">
+            <img id="userAvatar" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" alt="Avatar" class="avatar-img">
+        </div>
+        <input type="file" id="fileInput" accept="image/*" onchange="uploadFile(this)">
+        
+        <div class="user-info-text">
+            <h2 id="welcomeText" style="margin:0;">Привет!</h2>
+            <p style="color: #6b7280; margin: 5px 0 0 0;">Добро пожаловать в личный кабинет</p>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <h3>Проведено</h3>
+            <div class="count" id="hostedCount">0</div>
+        </div>
+        <div class="stat-card">
+            <h3>Сыграно</h3>
+            <div class="count" id="playedCount">0</div>
+        </div>
+        <div class="stat-card">
+            <h3>Победы</h3>
+            <div class="count" id="winsCount" style="color: var(--success-green);">0</div>
+        </div>
+    </div>
+
+    <div class="action-buttons">
+        <button onclick="location.href='/select-quiz.html'">Создать комнату</button>
+        <button class="secondary-btn" onclick="location.href='/join.html'">Присоединиться</button>
+    </div>
+</div>
+
+<script>
+    function showToast(message, type = 'error') {
+        let container = document.getElementById('toastContainer');
+        if (!container) { container = document.createElement('div'); container.id = 'toastContainer'; container.className = 'toast-container'; document.body.appendChild(container); }
+        const toast = document.createElement('div'); toast.className = `custom-toast ${type}`; toast.innerText = message; container.appendChild(toast);
+        setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 3000);
+    }
+
+    function toggleDropdown() { document.getElementById("myDropdown").classList.toggle("show"); }
+    window.onclick = function(event) {
+        if (!event.target.matches('.header-avatar')) {
+            const dropdowns = document.getElementsByClassName("dropdown-content");
+            for (let i = 0; i < dropdowns.length; i++) { if (dropdowns[i].classList.contains('show')) dropdowns[i].classList.remove('show'); }
+        }
+    }
+
+    async function uploadFile(input) {
+        if (!input.files || !input.files[0]) return;
+        const formData = new FormData(); formData.append('avatar', input.files[0]);
+        try {
+            const res = await fetch('/upload-avatar', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('userAvatar').src = data.avatarUrl;
+                document.getElementById('headerAvatar').src = data.avatarUrl;
+                showToast('Аватар успешно обновлен', 'success');
+            } else showToast(data.error, 'error');
+        } catch (err) { showToast('Ошибка соединения с сервером', 'error'); }
+    }
+
+    async function loadProfile() {
+        try {
+            const res = await fetch('/profile-data');
+            if (!res.ok) return window.location.href = '/';
+            const data = await res.json();
+            document.getElementById('welcomeText').innerText = `Привет, ${data.username}!`;
+            if (data.avatar) { document.getElementById('userAvatar').src = data.avatar; document.getElementById('headerAvatar').src = data.avatar; }
+            document.getElementById('hostedCount').innerText = data.hostedHistory.length;
+            document.getElementById('playedCount').innerText = data.playedHistory.length;
+            document.getElementById('winsCount').innerText = data.wins || 0;
+        } catch (err) { console.error(err); }
+    }
+
+    window.onload = () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const errorMsg = urlParams.get('error');
+        if (errorMsg) {
+            showToast(decodeURIComponent(errorMsg), 'error');
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        loadProfile();
+    };
+</script>
+</body>
+</html>

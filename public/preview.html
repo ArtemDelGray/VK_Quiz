@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Предпросмотр квиза - Quiz Service</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Quiz Service</h1>
+    <div class="header-right">
+        <a href="/quizzes.html" class="nav-link">Выйти из предпросмотра</a>
+    </div>
+</header>
+
+<div class="container" id="quizContainer" style="max-width: 800px;">
+    <div class="preview-header" id="quizHeader">
+        <h2 id="qTitle">Загрузка...</h2>
+        <div class="q-progress" id="qProgress"></div>
+    </div>
+    
+    <div id="questionArea"></div>
+    <div id="optionsArea"></div>
+    
+    <button id="actionBtn" onclick="checkAnswer()" disabled>Проверить</button>
+</div>
+
+<script>
+    let quiz = null;
+    let currentQ = 0;
+    let selectedOptions = [];
+    let totalScore = 0;
+    let isChecking = false;
+
+    function showToast(message, type = 'error') {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container';
+            document.body.appendChild(container);
+        }
+        const toast = document.createElement('div');
+        toast.className = `custom-toast ${type}`;
+        toast.innerText = message;
+        container.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    async function init() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const id = urlParams.get('id');
+        if (!id) return location.href = '/quizzes.html';
+
+        try {
+            const res = await fetch(`/quiz/${id}`);
+            if (!res.ok) throw new Error();
+            quiz = await res.json();
+            
+            if (!quiz.questions || quiz.questions.length === 0) {
+                document.getElementById('quizContainer').innerHTML = `
+                    <h2 style="text-align:center;">В этом квизе нет вопросов</h2>
+                    <button onclick="location.href='/quizzes.html'">Назад</button>
+                `;
+                return;
+            }
+            
+            renderQuestion();
+        } catch (e) {
+            showToast('Ошибка загрузки квиза', 'error');
+            setTimeout(() => { location.href = '/quizzes.html'; }, 2000);
+        }
+    }
+
+    function renderQuestion() {
+        isChecking = false;
+        selectedOptions = [];
+        const q = quiz.questions[currentQ];
+        
+        document.getElementById('qTitle').innerText = quiz.title;
+        document.getElementById('qProgress').innerText = `Вопрос ${currentQ + 1} из ${quiz.questions.length}`;
+        
+        let html = '';
+        if (q.image) {
+            html += `<img src="${q.image}" class="preview-img">`;
+        }
+        html += `<div class="preview-question-text">${q.text}</div>`;
+        html += `<div style="margin-bottom: 15px; color: #6b7280; font-size: 0.95rem; text-align: left;">
+                    ${q.type === 'single' ? 'Выберите один вариант ответа' : 'Выберите один или несколько вариантов ответа'}
+                 </div>`;
+        
+        document.getElementById('questionArea').innerHTML = html;
+        renderOptions();
+        
+        const btn = document.getElementById('actionBtn');
+        btn.innerText = 'Проверить';
+        btn.onclick = checkAnswer;
+        btn.disabled = true;
+    }
+
+    function renderOptions() {
+        const q = quiz.questions[currentQ];
+        let html = '';
+        
+        q.options.forEach((opt, idx) => {
+            const isSelected = selectedOptions.includes(idx);
+            let classes = 'option-row';
+            
+            if (isSelected) classes += ' selected';
+            
+            let icon = '✓';
+            
+            if (isChecking) {
+                classes += ' disabled';
+                if (opt.isCorrect && isSelected) {
+                    classes += ' correct'; 
+                    icon = '✓';
+                } else if (opt.isCorrect && !isSelected) {
+                    classes += ' missed-correct'; 
+                    icon = '✓'; 
+                } else if (!opt.isCorrect && isSelected) {
+                    classes += ' incorrect'; 
+                    icon = '✖';
+                }
+            }
+            
+            html += `
+                <div class="${classes}" onclick="toggleOption(${idx})">
+                    <span>${opt.text}</span>
+                    <span class="check-icon">${icon}</span>
+                </div>
+            `;
+        });
+        
+        document.getElementById('optionsArea').innerHTML = html;
+        
+        if (!isChecking) {
+            document.getElementById('actionBtn').disabled = selectedOptions.length === 0;
+        }
+    }
+
+    function toggleOption(idx) {
+        if (isChecking) return;
+        
+        const q = quiz.questions[currentQ];
+        if (q.type === 'single') {
+            selectedOptions = [idx];
+        } else {
+            const pos = selectedOptions.indexOf(idx);
+            if (pos === -1) selectedOptions.push(idx);
+            else selectedOptions.splice(pos, 1);
+        }
+        renderOptions();
+    }
+
+    function checkAnswer() {
+        isChecking = true;
+        const q = quiz.questions[currentQ];
+        
+        let qScore = 0;
+        const correctCount = q.options.filter(o => o.isCorrect).length;
+        
+        if (correctCount > 0) {
+            if (q.type === 'single') {
+                const selOpt = q.options[selectedOptions[0]];
+                if (selOpt && selOpt.isCorrect) qScore = 1;
+            } else {
+                const step = 1 / correctCount;
+                let correctSel = 0;
+                let wrongSel = 0;
+                
+                selectedOptions.forEach(idx => {
+                    if (q.options[idx].isCorrect) correctSel++;
+                    else wrongSel++;
+                });
+                
+                qScore = Math.max(0, (correctSel * step) - (wrongSel * step));
+            }
+        }
+        
+        totalScore += qScore;
+        
+        renderOptions(); 
+        
+        const btn = document.getElementById('actionBtn');
+        if (currentQ < quiz.questions.length - 1) {
+            btn.innerText = 'Следующий вопрос';
+            btn.onclick = () => {
+                currentQ++;
+                renderQuestion();
+            };
+        } else {
+            btn.innerText = 'Завершить';
+            btn.onclick = showResults;
+        }
+        btn.disabled = false;
+    }
+
+    function showResults() {
+        document.getElementById('quizHeader').style.display = 'none';
+        document.getElementById('optionsArea').innerHTML = '';
+        
+        const finalScore = Math.round(totalScore * 100) / 100;
+        
+        document.getElementById('questionArea').innerHTML = `
+            <div style="text-align:center; padding: 40px 0;">
+                <h2 style="font-size: 2rem; color: var(--primary-blue); margin-bottom: 20px;">Квиз завершен!</h2>
+                <p style="font-size: 1.2rem; margin-bottom: 10px;">Ваш результат:</p>
+                <div style="font-size: 4.5rem; font-weight: 900; color: var(--success-green); line-height: 1;">
+                    ${finalScore} <span style="font-size: 1.5rem; color: #6b7280;">/ ${quiz.questions.length}</span>
+                </div>
+            </div>
+        `;
+        
+        const btn = document.getElementById('actionBtn');
+        btn.innerText = 'Вернуться к моим квизам';
+        btn.onclick = () => location.href = '/quizzes.html';
+    }
+
+    init();
+</script>
+</body>
+</html>
